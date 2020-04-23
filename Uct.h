@@ -4,8 +4,6 @@
 #include <climits>
 #include <cmath>
 #include <iostream>
-#include <vector>
-#include <utility>
 #include "Judge.h"
 
 using namespace std;
@@ -18,9 +16,6 @@ const int TIE = 0;
 const int UNTERMINAL = -2;
 const double c = 0.8;
 
-
-int* tmp_top;
-int** tmp_board;
 
 class Node {
 private:
@@ -86,13 +81,12 @@ public:
 		if (lastX == -1 && lastY == -1) {
 			return false;
 		}
-		// 如果对方有两个制胜位，可以认为此时就是终止节点（？）不行！
-		// 在扩展的时候不能这样认为！
 		// 之前走的子赢了
 		if ((chessman == USER && userWin(lastX, lastY, row, col, board)) || (chessman == MACHINE && machineWin(lastX, lastY, row, col, board)) ||
 			isTie(col, top)) {
 			return true;
 		}
+
 		return false;
 	}
 	bool isExpandable() {
@@ -107,35 +101,28 @@ public:
 	}
 	Node* expand() {	// expand是增加孩子节点，减少可扩展节点
 		// 首先复制，为什么要复制一份呢？因为你的top和board需要被修改,children的top和board正是在此基础上的
-		/*int* newTop = copyTop(top);
-		int** newBoard = copyBoard(board);*/
-		int* newTop = top;
-		int** newBoard = board;
+		int* newTop = copyTop(top);
+		int** newBoard = copyBoard(board);
 		int id = rand() % expandableNum;	// 随机选择一个可落子点
-		int y = expandCol[id], orig = newTop[y];
-		int x = --newTop[y];		// 新棋子的位置
+		int y = expandCol[id], x = --newTop[y];		// 新棋子的位置
 		newBoard[x][y] = 3 - chessman;		// 在新棋子的位置放置己方的棋子
 		if (x - 1 == noX && y == noY) {		// 假如遇到了不可落子点
 			--newTop[y];
 		}
 		children[y] = new Node(row, col, x, y, newBoard, newTop, noX, noY, 0, 0, 3 - chessman, this);	// 3-chessman就相当于棋权变换了
 		swap(expandCol[id], expandCol[--expandableNum]);
-		// 恢复
-		newBoard[x][y] = 0;
-		newTop[y] = orig;
-		newTop = nullptr;
-		newBoard = nullptr;
-		/*if (newTop) {
+		if (newTop) {
 			delete[] newTop;
 			newTop = nullptr;
 		}
 		if (newBoard) {
 			for (int i = 0; i < row; i++) {
 				delete[] newBoard[i];
+				newBoard[i] = nullptr;
 			}
 			delete[] newBoard;
 			newBoard = nullptr;
-		}*/
+		}
 		return children[y];
 	}
 	Node* bestChild(double c) {			// 从中挑选出bestChild，并返回
@@ -164,7 +151,7 @@ public:
 		}
 	}
 	~Node() {
-		// delete board, top, children, expandCol
+		// delete board, top, parent, children, expandCol
 		if (top) {
 			delete[] top;
 			top = nullptr;
@@ -186,7 +173,7 @@ public:
 			delete[] expandCol;
 			expandCol = nullptr;
 		}
-		// fprintf(stderr, "delete expanCol!");
+		//		fprintf(stderr, "delete expanCol!");
 		if (children) {
 			for (int i = 0; i < col; i++) {
 				// children[i]->clear();
@@ -196,8 +183,7 @@ public:
 			delete[] children;
 			children = nullptr;
 		}
-		parent = nullptr;
-		// fprintf(stderr, "deleteAnode in a function!");
+		//		fprintf(stderr, "deleteAnode in a function!");
 	}
 };
 
@@ -220,52 +206,22 @@ class UCT {
 	}
 	// 返回获胜与否
 	int getProfit(int chessman, int x, int y, int** board, int* top) {
-		// 常规
 		if (chessman == USER && userWin(x, y, row, col, board))
 			return USER_WIN;
 		if (chessman == MACHINE && machineWin(x, y, row, col, board))
 			return MACHINE_WIN;
 		if (isTie(col, top))
 			return TIE;
-		// 若常规意义上讲没有获胜
-		// 对于本步来讲，chessman是对方
-		int me = 3 - chessman, you = chessman;
-		int mycount = 0;
-		// 若我有至少一个制胜位，我就赢了，因为这一步是我走
-		for (int i = 0; i < col; i++) {
-			if (top[i] != 0) {
-				board[top[i] - 1][i] = me;	// place a chess
-				bool flag = (me == USER) ? userWin(top[i] - 1, i, row, col, board) : machineWin(top[i] - 1, i, row, col, board);
-				if (flag) {
-					++mycount;
-					board[top[i] - 1][i] = 0;
-					break;
-				}
-				board[top[i] - 1][i] = 0;	// 回位
-			}
-		}
-		if (mycount > 0)
-			return me == USER ? USER_WIN: MACHINE_WIN;
-		// 若对方有两个制胜位
-		int chessman_count = 0;
-		for (int i = 0; i < col; i++) {
-			if (top[i] != 0) {
-				board[top[i] - 1][i] = you;	// place a chess
-				bool flag = (you == USER) ? userWin(top[i] - 1, i, row, col, board) : machineWin(top[i] - 1, i, row, col, board);
-				if (flag)
-					++chessman_count;
-				board[top[i] - 1][i] = 0;	// 回位
-			}
-		}
-		if (chessman_count >= 2) {
-			return you == USER ? USER_WIN : MACHINE_WIN;
-		}
 		return UNTERMINAL;
 	}
 	// 返回谁赢了
 	int defaultPolicy(Node* v) {		// 根据v当前状态进行判定
 		// 先把v的状态取出来，但是节点v的top和board因为不能修改，所以得拷贝一份
 		int tmp_chessman = v->getChessman();
+
+		int* tmp_top = new int[col];
+		int** tmp_board = new int* [row];
+
 		int* v_top = v->getTop();
 		int** v_board = v->getBoard();
 		// 将v的top和board状态复制一份
@@ -273,6 +229,7 @@ class UCT {
 			tmp_top[i] = v_top[i];
 		}
 		for (int i = 0; i < row; i++) {
+			tmp_board[i] = new int[col];
 			for (int j = 0; j < col; j++) {
 				tmp_board[i][j] = v_board[i][j];
 			}
@@ -283,8 +240,6 @@ class UCT {
 		double p = getProfit(tmp_chessman, x, y, tmp_board, tmp_top);	// 其实是看当前状态是否是终止状态
 		// 若尚未结束，就执行循环
 		while (p == UNTERMINAL) {
-			// p是unterminal就说明了特殊情况只可能是对方有一个制胜位
-			// 但是现在先不更改
 			// 随机一列
 			y = rand() % col;
 			while (tmp_top[y] == 0) {
@@ -300,6 +255,20 @@ class UCT {
 			tmp_chessman = 3 - tmp_chessman;
 			p = getProfit(tmp_chessman, x, y, tmp_board, tmp_top);
 		}
+		if (tmp_top) {
+			delete[] tmp_top;
+			tmp_top = nullptr;
+		}
+		if (tmp_board) {
+			for (int i = 0; i < row; i++) {
+				delete[] tmp_board[i];
+				tmp_board[i] = nullptr;
+			}
+			delete[] tmp_board;
+			tmp_board = nullptr;
+		}
+		v_board = nullptr;
+		v_top = nullptr;
 		if (p == MACHINE_WIN) {
 			return MACHINE;
 		}
@@ -317,7 +286,7 @@ public:
 	UCT(int _row, int _col, int lastX, int lastY, int _noX, int _noY, int** board, int* top) {
 		startTime = clock();
 		// cout << "startTime:" << startTime << endl;
-		root = new Node(_row, _col, lastX, lastY, board, top, _noX, _noY, 0, 0, USER, nullptr);
+		root = new Node(_row, _col, lastX, lastY, board, top, _noX, _noY, 0, 0, USER, nullptr);		// 构造函数中new，析构函数中delete
 		row = _row;
 		col = _col;
 		noX = _noX;
@@ -325,21 +294,16 @@ public:
 	}
 	Node* uctSearch() {
 		srand((unsigned)time(NULL));
-		tmp_top = new int[col];
-		tmp_board = new int* [row];
-		for (int i = 0; i < row; i++) {
-			tmp_board[i] = new int[col];
-		}
-		while (clock() - startTime <= 2.3 * CLOCKS_PER_SEC) {
-			Node* v = treePolicy(root);
-			int who_win = defaultPolicy(v);
+		Node* v = nullptr;
+		int who_win = MACHINE;
+		while (1) {
+			v = treePolicy(root);		// v返回的是new出来的一个孩子，也就是说析构这棵树本身就会把这块内存删掉，再加上程序退出，局部变量本来就会销毁
+			who_win = defaultPolicy(v);
 			backUp(v, who_win);
+			if (clock() - startTime >= 2.3 * CLOCKS_PER_SEC)
+				break;
 		}
 		// cout << "Elapsed time: " << clock() - startTime << endl;
-		delete[] tmp_top;
-		for (int i = 0; i < row; i++)
-			delete[] tmp_board[i];
-		delete[] tmp_board;
 		return root->bestChild(0);
 	}
 	~UCT() {
